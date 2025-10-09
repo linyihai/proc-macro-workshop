@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, DataStruct, DeriveInput, Fields, FieldsNamed};
+use syn::{parse_macro_input, DataStruct, DeriveInput, Fields, FieldsNamed, Type};
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -45,11 +45,17 @@ pub fn derive(input: TokenStream) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
+    let set_fields_methods = set_fields(&fields);
+
     // Finally assemble the TokeStream.
     let name_builder = format_ident!("{}Builder", name);
     let expanded = quote! {
         pub struct #name_builder  {
             #(#build_op_fields),*
+        }
+
+        impl #name_builder {
+            #(#set_fields_methods)*
         }
 
         impl #name {
@@ -62,4 +68,17 @@ pub fn derive(input: TokenStream) -> TokenStream {
     };
     // Although quote! return is TokenStream but it is not the same as proc_macro::TokenStream, So need to covert it.
     proc_macro::TokenStream::from(expanded)
+}
+
+fn set_fields(fiedls: &[(proc_macro2::Ident, Type)]) -> Vec<proc_macro2::TokenStream> {
+    fiedls
+        .iter()
+        .map(|(name, ty)| {
+            quote! {
+                fn #name (&mut self, #name: #ty) {
+                    self.#name = ::core::option::Option::Some(#name)
+                }
+            }
+        })
+        .collect::<Vec<_>>()
 }

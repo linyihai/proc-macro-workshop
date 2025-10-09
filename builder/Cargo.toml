@@ -19,3 +19,4 @@ trybuild = { version = "1.0.108", features = ["diff"] }
 # TODO
 syn = "2.0.106"
 quote = "1.0.41"
+proc-macro2 = "1.0.101"
