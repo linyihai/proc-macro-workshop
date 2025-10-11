@@ -46,6 +46,14 @@ pub fn derive(input: TokenStream) -> TokenStream {
         .collect::<Vec<_>>();
 
     let set_fields_methods = set_fields(&fields);
+    let set_fields_back = fields
+        .iter()
+        .map(|(name, _)| {
+            quote! {
+                #name: self.#name.take().expect(&format!("Field {} is not set", stringify!(#name)))
+            }
+        })
+        .collect::<Vec<_>>();
 
     // Finally assemble the TokeStream.
     let name_builder = format_ident!("{}Builder", name);
@@ -56,6 +64,12 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
         impl #name_builder {
             #(#set_fields_methods)*
+
+            fn build(&mut self) -> ::core::result::Result<#name, std::boxed::Box<dyn ::std::error::Error>> {
+                Ok(#name {
+                    #(#set_fields_back),*
+                })
+            }
         }
 
         impl #name {
