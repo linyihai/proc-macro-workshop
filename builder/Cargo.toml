@@ -13,8 +13,12 @@ name = "tests"
 path = "tests/progress.rs"
 
 [[bin]]
-name = "builder"
+name = "builder-04"
 path = "tests/04-call-build.rs"
+
+[[bin]]
+name = "builder-06"
+path = "tests/06-optional-field.rs"
 
 [dev-dependencies]
 trybuild = { version = "1.0.108", features = ["diff"] }
