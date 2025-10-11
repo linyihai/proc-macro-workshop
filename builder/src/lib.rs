@@ -89,8 +89,9 @@ fn set_fields(fiedls: &[(proc_macro2::Ident, Type)]) -> Vec<proc_macro2::TokenSt
         .iter()
         .map(|(name, ty)| {
             quote! {
-                fn #name (&mut self, #name: #ty) {
-                    self.#name = ::core::option::Option::Some(#name)
+                fn #name (&mut self, #name: #ty) -> &mut Self {
+                    self.#name = ::core::option::Option::Some(#name);
+                    self
                 }
             }
         })
