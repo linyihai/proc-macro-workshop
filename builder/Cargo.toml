@@ -20,11 +20,15 @@ path = "tests/04-call-build.rs"
 name = "builder-06"
 path = "tests/06-optional-field.rs"
 
+[[bin]]
+name = "builder-07"
+path = "tests/07-repeated-field.rs"
+
 [dev-dependencies]
 trybuild = { version = "1.0.108", features = ["diff"] }
 
 [dependencies]
 # TODO
-syn = "2.0.106"
+syn = { version = "2.0.106", features = ["full"] }
 quote = "1.0.41"
 proc-macro2 = "1.0.101"
