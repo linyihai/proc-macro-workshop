@@ -1,30 +1,40 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, DataStruct, DeriveInput, Expr, Field, Fields, FieldsNamed, Ident, Lit,
-    MetaNameValue, PathSegment, Type, TypePath,
+    parse_macro_input, spanned::Spanned, DataStruct, DeriveInput, Error, Expr, Field, Fields,
+    FieldsNamed, Ident, Lit, MetaNameValue, PathSegment, Type, TypePath,
 };
 
 #[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: TokenStream) -> TokenStream {
+    // `parse_macro_input` can not put in derive_impl since it doesn't return Result<T>.
     let input = parse_macro_input!(input as DeriveInput);
+
+    match derive_impl(input) {
+        Ok(tokens) => tokens,
+        // syn::Error the method `to_compile_error` transform to `compile_error!`, so then derive_impl needs return syn::Error
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn derive_impl(input: DeriveInput) -> Result<TokenStream, Error> {
     let name = input.ident;
     let fields = input.data;
 
     // Get fields and ty from named struct.
     // The difficulty for newbie is the unfamiliar with the syn struct.
-    let fields: Vec<OptionalField> = match fields {
+    let fields = match fields {
         syn::Data::Struct(DataStruct {
             fields: Fields::Named(FieldsNamed { named, .. }),
             ..
         }) => named
             .iter()
-            .map(|f| OptionalField::from(f.clone()))
-            .collect(),
+            .map(|f| OptionalField::try_from(f.clone()))
+            .collect::<Result<Vec<OptionalField>, Error>>(),
         _ => {
             panic!("Builder can only be derived for structs");
         }
-    };
+    }?;
     let builder_fields = fields
         .iter()
         .map(|op| {
@@ -89,7 +99,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         }
     };
     // Although quote! return is TokenStream but it is not the same as proc_macro::TokenStream, So need to covert it.
-    proc_macro::TokenStream::from(expanded)
+    Ok(proc_macro::TokenStream::from(expanded))
 }
 
 struct OptionalField {
@@ -100,18 +110,20 @@ struct OptionalField {
     angle_type: AngleBracketed,
 }
 
-impl From<Field> for OptionalField {
-    fn from(field: Field) -> Self {
-        let attr = parse_each_attr(field.attrs.first()).unwrap();
+impl TryFrom<Field> for OptionalField {
+    type Error = Error;
+
+    fn try_from(field: Field) -> Result<Self, Self::Error> {
+        let attr = parse_each_attr(field.attrs.first())?;
         let (ty, inner_ty, angle_type) = parse_ty(field.ty, attr.is_some());
 
-        OptionalField {
+        Ok(OptionalField {
             name: field.ident.unwrap(),
             ty,
             attr,
             inner_ty,
             angle_type,
-        }
+        })
     }
 }
 
@@ -189,9 +201,7 @@ fn generate_builder_methods(fiedls: &[OptionalField]) -> Vec<proc_macro2::TokenS
 // Parse each attribute
 // Why returning Ident rather than String, because the String surrounding by the quote, like "a", it's trickly to pass the string in the
 // `quote!`. So it's best to pass a ident to `quote!`.
-fn parse_each_attr(
-    attr: Option<&syn::Attribute>,
-) -> Result<Option<Ident>, Box<dyn std::error::Error>> {
+fn parse_each_attr(attr: Option<&syn::Attribute>) -> Result<Option<Ident>, Error> {
     match attr {
         Some(attr) if attr.path().is_ident("builder") => match attr.parse_args()? {
             MetaNameValue {
@@ -201,7 +211,16 @@ fn parse_each_attr(
                         lit: Lit::Str(lit), ..
                     }),
                 ..
-            } if path.is_ident("each") => Ok(Some(format_ident!("{}", lit.value()))),
+            } => {
+                if path.is_ident("each") {
+                    Ok(Some(format_ident!("{}", lit.value())))
+                } else {
+                    Err(Error::new(
+                        attr.meta.span(),
+                        r#"expected `builder(each = "...")`"#,
+                    ))
+                }
+            }
             _ => Ok(None),
         },
         _ => Ok(None),
