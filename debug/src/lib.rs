@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{
     parse_macro_input, DataStruct, DeriveInput, Error, Field, Fields, FieldsNamed, Generics, Ident,
-    Meta,
+    Meta, Type,
 };
 
 #[proc_macro_derive(CustomDebug, attributes(debug))]
@@ -32,24 +32,24 @@ fn derive_impl(input: DeriveInput) -> Result<TokenStream, Error> {
         )),
     }?;
     let field_methods = fields.iter().map(|f| {
-        let name = f.ident.to_string();
-        let value = f.ident.clone();
+        let value = &f.ident;
         let formatter = f.formatter.clone();
         // `&::std::format_args!(#formatter, &self.#value)` is treated as `Debug`
         // cannot use `format!` here
+        //
+        // stringify! can add quote to the name.
         quote! {
-            .field(#name, &::std::format_args!(#formatter, &self.#value))
+            .field(::std::stringify!(#value), &::std::format_args!(#formatter, &self.#value))
         }
     });
-    let quote_name = name.to_string();
 
-    let generics = add_debug_trait_bound(input.generics);
+    let generics = add_debug_trait_bound(input.generics, &fields);
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     Ok(quote! {
         impl #impl_generics ::std::fmt::Debug for #name #ty_generics #where_clause {
             fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                f.debug_struct(#quote_name)
+                f.debug_struct(::std::stringify!(#name))
                     #(#field_methods)*
                     .finish()
             }
@@ -61,6 +61,7 @@ fn derive_impl(input: DeriveInput) -> Result<TokenStream, Error> {
 struct DebugField {
     ident: Ident,
     formatter: proc_macro2::TokenStream,
+    ty: Type,
 }
 
 impl TryFrom<Field> for DebugField {
@@ -73,9 +74,11 @@ impl TryFrom<Field> for DebugField {
                 .iter()
                 .find(|attr| attr.path().is_ident("debug")),
         );
+
         Ok(DebugField {
             ident: value.ident.unwrap(),
             formatter,
+            ty: value.ty,
         })
     }
 }
@@ -93,11 +96,27 @@ fn parse_debug_attr(attr: Option<&syn::Attribute>) -> proc_macro2::TokenStream {
     }
 }
 
-fn add_debug_trait_bound(mut generics: Generics) -> Generics {
+fn add_debug_trait_bound(mut generics: Generics, fields: &[DebugField]) -> Generics {
     for param in &mut generics.params {
         if let syn::GenericParam::Type(ref mut type_param) = param {
-            type_param.bounds.push(syn::parse_quote!(::std::fmt::Debug));
+            let t = &type_param.ident;
+            let expected_ty: Type = syn::parse_quote!(PhantomData<#t>);
+
+            // I misunderstood the intention here, we need skip add debug trait bound to T if the struct contains PhantomData<T>
+            // rather than add debug trait bound to PhantomData<T>.
+            if fields.iter().any(|field| expected_ty == field.ty) {
+                continue;
+            }
+            // The is for 04-type-parameter only Generic Param T as the Struct field then add debug trait bound
+            if fields.iter().any(|field| {
+                field.ty.clone().into_token_stream().into_iter().any(
+                |token| matches!(token, proc_macro2::TokenTree::Ident( ref ident) if * t == * ident)
+            )
+            }) {
+                type_param.bounds.push(syn::parse_quote!(::std::fmt::Debug));
+            }
         }
     }
+
     generics
 }

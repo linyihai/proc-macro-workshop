@@ -16,6 +16,10 @@ path = "tests/03-custom-format.rs"
 name = "debug-4"
 path = "tests/04-type-parameter.rs"
 
+[[bin]]
+name = "debug-5"
+path = "tests/05-phantom-data.rs"
+
 [[test]]
 name = "tests"
 path = "tests/progress.rs"
@@ -24,6 +28,7 @@ path = "tests/progress.rs"
 trybuild = { version = "1.0.108", features = ["diff"] }
 
 [dependencies]
-syn = { version = "2.0.106", features = ["full"] }
+# "extra-traits" makes Debug and PartialEq available 
+syn = { version = "2.0.106", features = ["full", "extra-traits"] }
 quote = "1.0.26"
 proc-macro2 = "1.0.95"
