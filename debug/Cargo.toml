@@ -12,6 +12,10 @@ proc-macro = true
 name = "debug-3"
 path = "tests/03-custom-format.rs"
 
+[[bin]]
+name = "debug-4"
+path = "tests/04-type-parameter.rs"
+
 [[test]]
 name = "tests"
 path = "tests/progress.rs"

@@ -1,6 +1,9 @@
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{DataStruct, DeriveInput, Error, Field, Fields, FieldsNamed, Ident, Meta, parse_macro_input};
+use syn::{
+    parse_macro_input, DataStruct, DeriveInput, Error, Field, Fields, FieldsNamed, Generics, Ident,
+    Meta,
+};
 
 #[proc_macro_derive(CustomDebug, attributes(debug))]
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -39,8 +42,12 @@ fn derive_impl(input: DeriveInput) -> Result<TokenStream, Error> {
         }
     });
     let quote_name = name.to_string();
+
+    let generics = add_debug_trait_bound(input.generics);
+    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+
     Ok(quote! {
-        impl ::std::fmt::Debug for #name {
+        impl #impl_generics ::std::fmt::Debug for #name #ty_generics #where_clause {
             fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 f.debug_struct(#quote_name)
                     #(#field_methods)*
@@ -84,4 +91,13 @@ fn parse_debug_attr(attr: Option<&syn::Attribute>) -> proc_macro2::TokenStream {
     } else {
         quote! {"{:?}"}
     }
+}
+
+fn add_debug_trait_bound(mut generics: Generics) -> Generics {
+    for param in &mut generics.params {
+        if let syn::GenericParam::Type(ref mut type_param) = param {
+            type_param.bounds.push(syn::parse_quote!(::std::fmt::Debug));
+        }
+    }
+    generics
 }
