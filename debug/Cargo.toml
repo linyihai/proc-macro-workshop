@@ -8,6 +8,10 @@ publish = false
 [lib]
 proc-macro = true
 
+[[bin]]
+name = "debug-3"
+path = "tests/03-custom-format.rs"
+
 [[test]]
 name = "tests"
 path = "tests/progress.rs"
@@ -16,5 +20,6 @@ path = "tests/progress.rs"
 trybuild = { version = "1.0.108", features = ["diff"] }
 
 [dependencies]
-syn = "2.0.106"
+syn = { version = "2.0.106", features = ["full"] }
 quote = "1.0.26"
+proc-macro2 = "1.0.95"
