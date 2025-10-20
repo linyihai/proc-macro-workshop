@@ -1,9 +1,11 @@
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{
-    parse_macro_input, DataStruct, DeriveInput, Error, Field, Fields, FieldsNamed, Generics, Ident,
-    Meta, Type,
+    parse_macro_input, DataStruct, DeriveInput, Error, Field, Fields, FieldsNamed, GenericArgument,
+    Generics, Ident, Meta, PathSegment, Type, TypePath,
 };
+
+use syn::PathArguments::AngleBracketed;
 
 #[proc_macro_derive(CustomDebug, attributes(debug))]
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -102,21 +104,76 @@ fn add_debug_trait_bound(mut generics: Generics, fields: &[DebugField]) -> Gener
             let t = &type_param.ident;
             let expected_ty: Type = syn::parse_quote!(PhantomData<#t>);
 
-            // I misunderstood the intention here, we need skip add debug trait bound to T if the struct contains PhantomData<T>
-            // rather than add debug trait bound to PhantomData<T>.
-            if fields.iter().any(|field| expected_ty == field.ty) {
-                continue;
-            }
-            // The is for 04-type-parameter only Generic Param T as the Struct field then add debug trait bound
-            if fields.iter().any(|field| {
-                field.ty.clone().into_token_stream().into_iter().any(
-                |token| matches!(token, proc_macro2::TokenTree::Ident( ref ident) if * t == * ident)
-            )
-            }) {
-                type_param.bounds.push(syn::parse_quote!(::std::fmt::Debug));
+            for field_ty in fields {
+                // I misunderstood the intention here, we need skip add debug trait bound to T if the struct contains PhantomData<T>
+                // rather than add debug trait bound to PhantomData<T>.
+                if field_ty.ty == expected_ty {
+                    continue;
+                }
+
+                let generics_associated = find_generics_associated(t, &field_ty.ty);
+                if !generics_associated.is_empty() {
+                    if let Some(where_clause) = generics.where_clause.as_mut() {
+                        where_clause
+                            .predicates
+                            .push(syn::parse_quote!(#(#generics_associated: ::std::fmt::Debug)*));
+                    } else {
+                        generics.where_clause = Some(
+                            syn::parse_quote!(where #(#generics_associated: ::std::fmt::Debug)*),
+                        );
+                    }
+                } else {
+                    // The is for 04-type-parameter only Generic Param T as the Struct field then add debug trait bound
+                    let included  =   field_ty.ty.clone().into_token_stream().into_iter().any(
+                |token| matches!(token, proc_macro2::TokenTree::Ident( ref ident) if * t == * ident));
+                    if included {
+                        type_param.bounds.push(syn::parse_quote!(::std::fmt::Debug));
+                        break;
+                    }
+                }
             }
         }
     }
 
     generics
+}
+
+fn find_generics_associated(generics: &Ident, ty: &Type) -> Vec<Type> {
+    let Type::Path(TypePath { path, .. }) = ty else {
+        return Vec::new();
+    };
+    // when ty is T::Value, its segments includes two segments T and Value.
+    if path.segments.len() > 1
+        && path.segments.first().expect("Except first segment").ident == *generics
+    {
+        return vec![ty.clone()];
+    }
+
+    // Get the T::Value from Vec<T::Value>
+    let striped = strip_segment(path.segments.last().expect("Except last segment"));
+    let Some(striped) = striped else {
+        return Vec::new();
+    };
+    let mut result = vec![];
+    for striped_ty in striped {
+        result.append(find_generics_associated(generics, &striped_ty).as_mut())
+    }
+    result.dedup();
+    result
+}
+
+fn strip_segment(path: &PathSegment) -> Option<Vec<Type>> {
+    match &path.arguments {
+        AngleBracketed(bracketed_args) => {
+            let mut striped = vec![];
+            for arg in &bracketed_args.args {
+                let GenericArgument::Type(striped_type) = arg else {
+                    continue;
+                };
+                striped.push(striped_type.clone());
+            }
+            Some(striped)
+        }
+        _ => None,
+    }
 }

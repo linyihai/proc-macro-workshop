@@ -20,6 +20,10 @@ path = "tests/04-type-parameter.rs"
 name = "debug-5"
 path = "tests/05-phantom-data.rs"
 
+[[bin]]
+name = "debug-7"
+path = "tests/07-associated-type.rs"
+
 [[test]]
 name = "tests"
 path = "tests/progress.rs"
