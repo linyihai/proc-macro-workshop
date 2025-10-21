@@ -17,3 +17,5 @@ trybuild = { version = "1.0.108", features = ["diff"] }
 
 [dependencies]
 # TODO
+syn = "2.0.107"
+quote = "1"
