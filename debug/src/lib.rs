@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
-use quote::{quote, ToTokens};
+use quote::{ToTokens, quote};
 use syn::{
-    parse_macro_input, DataStruct, DeriveInput, Error, Field, Fields, FieldsNamed, GenericArgument,
-    Generics, Ident, Meta, PathSegment, Type, TypePath,
+    DataStruct, DeriveInput, Error, Expr, Field, Fields, FieldsNamed, GenericArgument, Generics,
+    Ident, Lit, Meta, MetaNameValue, PathSegment, Type, TypePath, parse_macro_input,
 };
 
 use syn::PathArguments::AngleBracketed;
@@ -17,7 +17,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
     }
 }
 
-fn derive_impl(input: DeriveInput) -> Result<TokenStream, Error> {
+fn derive_impl(mut input: DeriveInput) -> Result<TokenStream, Error> {
     let name = input.ident;
 
     let fields = match &input.data {
@@ -33,6 +33,39 @@ fn derive_impl(input: DeriveInput) -> Result<TokenStream, Error> {
             "CustomDebug can only be derived for named structs",
         )),
     }?;
+    let custom_bound = input
+        .attrs
+        .iter()
+        .find(|attr| attr.path().is_ident("debug"));
+
+    let mut is_bound = false;
+    if let Some(attr) = custom_bound
+        && attr.path().is_ident("debug")
+        && let Meta::NameValue(MetaNameValue {
+            path,
+            value:
+                Expr::Lit(syn::ExprLit {
+                    lit: Lit::Str(value),
+                    ..
+                }),
+            ..
+        }) = attr.parse_args()?
+        && path.is_ident("bound")
+    {
+        is_bound = true;
+        let bound = value.value();
+        // Note: Must use `syn::parse_str`, but not quote::quote!(#bound) or value.to_token_stream()
+        // Since `T::Value: Debug` is a compound strunct.
+        let Ok(bound) = syn::parse_str::<proc_macro2::TokenStream>(&bound) else {
+            return Err(syn::Error::new_spanned(&attr.meta, "Invalid bound"));
+        };
+        if let Some(ref mut where_clause) = input.generics.where_clause {
+            where_clause.predicates.push(syn::parse_quote!(#bound))
+        } else {
+            input.generics.where_clause = Some(syn::parse_quote!(where #bound))
+        }
+    }
+
     let field_methods = fields.iter().map(|f| {
         let value = &f.ident;
         let formatter = f.formatter.clone();
@@ -45,8 +78,11 @@ fn derive_impl(input: DeriveInput) -> Result<TokenStream, Error> {
         }
     });
 
-    let generics = add_debug_trait_bound(input.generics, &fields);
-    let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+    if !is_bound {
+        add_debug_trait_bound(&mut input.generics, &fields);
+    }
+
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     Ok(quote! {
         impl #impl_generics ::std::fmt::Debug for #name #ty_generics #where_clause {
@@ -98,9 +134,9 @@ fn parse_debug_attr(attr: Option<&syn::Attribute>) -> proc_macro2::TokenStream {
     }
 }
 
-fn add_debug_trait_bound(mut generics: Generics, fields: &[DebugField]) -> Generics {
+fn add_debug_trait_bound(generics: &mut Generics, fields: &[DebugField]) {
     for param in &mut generics.params {
-        if let syn::GenericParam::Type(ref mut type_param) = param {
+        if let syn::GenericParam::Type(type_param) = param {
             let t = &type_param.ident;
             let expected_ty: Type = syn::parse_quote!(PhantomData<#t>);
 
@@ -134,8 +170,6 @@ fn add_debug_trait_bound(mut generics: Generics, fields: &[DebugField]) -> Gener
             }
         }
     }
-
-    generics
 }
 
 fn find_generics_associated(generics: &Ident, ty: &Type) -> Vec<Type> {

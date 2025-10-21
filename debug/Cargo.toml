@@ -2,7 +2,7 @@
 name = "derive_debug"
 version = "0.0.0"
 autotests = false
-edition = "2021"
+edition = "2024"
 publish = false
 
 [lib]
@@ -23,6 +23,10 @@ path = "tests/05-phantom-data.rs"
 [[bin]]
 name = "debug-7"
 path = "tests/07-associated-type.rs"
+
+[[bin]]
+name = "debug-8"
+path = "tests/08-escape-hatch.rs"
 
 [[test]]
 name = "tests"
