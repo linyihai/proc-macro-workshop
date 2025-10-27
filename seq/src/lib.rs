@@ -79,18 +79,115 @@ fn exec_seq(mut seq: SeqParese) -> Result<TokenStream> {
 
     let inclusive = matches!(seq.range.limits, syn::RangeLimits::Closed(_));
 
-    let mut expander = RangeExpand {
+    let expander = RangeExpand {
         start,
         end,
         inclusive,
         name: seq.name,
     };
-    
-    expander.visit_token_stream_mut(&mut seq.body);
+
+    let mut section = Section {
+        expander,
+        else_need_expand: false,
+    };
+    section.visit_token_stream_mut(&mut seq.body);
+    if section.else_need_expand {
+        section.expander.visit_token_stream_mut(&mut seq.body);
+    }
+
     let tokens = &seq.body;
     let tokens = quote::quote!(#tokens);
 
     Ok(TokenStream::from(tokens))
+}
+
+struct Section {
+    expander: RangeExpand,
+    // for `02-parse-body`
+    else_need_expand: bool,
+}
+
+impl VisitMut for Section {
+    fn visit_token_stream_mut(&mut self, node: &mut proc_macro2::TokenStream) {
+        // Very important, we must parse `#(stream)*` stream as TokenStream not TokenTree
+        // That say we can parse the inner of strem as `TokenTree`. See Placeholder::visit_token_stream_mut.
+        let mut tokens: Vec<proc_macro2::TokenStream> = vec![];
+        let cloned_node = node.clone();
+        let mut iter = cloned_node.into_iter().peekable();
+
+        while iter.peek().is_some() {
+            let mut window = iter.clone().take(3);
+            let mut t = iter.next().unwrap();
+
+            let (
+                Some(TokenTree::Punct(left_pnunc)),
+                Some(TokenTree::Group(group)),
+                Some(TokenTree::Punct(right_pnunc)),
+            ) = (window.next(), window.next(), window.next())
+            else {
+                self.expand(&mut t);
+                // uses `parse_quote_spanned` to transform `TokenTree` to `TokenStream`
+                tokens.push(parse_quote_spanned! {t.span()=> #t});
+                continue;
+            };
+
+            if left_pnunc.to_string() == "#"
+                && right_pnunc.to_string() == "*"
+                && group.delimiter() == Delimiter::Parenthesis
+            {
+                // Delegate to expander to expand the stream
+                let mut stream = group.stream();
+                self.expander.visit_token_stream_mut(&mut stream);
+                tokens.push(parse_quote_spanned! {group.span()=> #stream});
+
+                // We parse the group stream alrealy, need to drop the origin unparsed item in iter.
+                let _ = iter.nth(1);
+            } else {
+                self.expand(&mut t);
+                // uses `parse_quote_spanned` to transform `TokenTree` to `TokenStream`
+                tokens.push(parse_quote_spanned! {t.span()=> #t});
+            }
+        }
+
+        *node = parse_quote_spanned! {node.span()=> #(#tokens)*};
+        // Or
+        // *node = syn::parse_quote!(#(#tokens)*);
+    }
+}
+
+impl Section {
+    fn expand(&mut self, node: &mut proc_macro2::TokenTree) {
+        match node {
+            TokenTree::Group(g) => {
+                let mut stream = g.stream();
+                let delimiter = g.delimiter();
+                // Yeah, Once there is still TokenStream left, we recursively parse it by `visit_token_stream_mut`.
+                // Beware that stream had spilted off the delimiter (like `[]` or `()` or `{}`)
+                self.visit_token_stream_mut(&mut stream);
+                // We need to recover the delimiter, so encapsulate the stream with the delimiter.
+                *node = match delimiter {
+                    Delimiter::Brace => {
+                        parse_quote_spanned! {node.span()=> {#stream}}
+                    }
+                    Delimiter::Bracket => {
+                        parse_quote_spanned! {node.span()=> [#stream]}
+                    }
+                    Delimiter::Parenthesis => {
+                        parse_quote_spanned! {node.span()=> (#stream)}
+                    }
+                    Delimiter::None => {
+                        parse_quote_spanned! {node.span()=> #stream}
+                    }
+                };
+            }
+            TokenTree::Ident(t) => {
+                if *t == self.expander.name {
+                    self.else_need_expand = true;
+                }
+            }
+            _ => (),
+        }
+    }
 }
 
 struct SeqParese {
