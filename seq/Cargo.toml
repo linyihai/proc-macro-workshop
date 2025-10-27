@@ -2,11 +2,15 @@
 name = "seq"
 version = "0.0.0"
 autotests = false
-edition = "2021"
+edition = "2024"
 publish = false
 
 [lib]
 proc-macro = true
+
+[[bin]]
+name = "seq-4"
+path = "tests/04-paste-ident.rs"
 
 [[test]]
 name = "tests"

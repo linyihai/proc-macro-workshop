@@ -1,14 +1,14 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Delimiter, TokenTree};
+use syn::Result;
 use syn::parse_quote_spanned;
 use syn::spanned::Spanned;
 use syn::visit_mut::VisitMut;
-use syn::Result;
 
 use syn::{
-    braced,
+    ExprRange, Ident, Token, braced,
     parse::{Parse, ParseStream},
-    parse_macro_input, ExprRange, Ident, Token,
+    parse_macro_input,
 };
 
 #[proc_macro]
@@ -93,7 +93,7 @@ impl VisitMut for Placeholder {
             let mut t = iter.next().unwrap();
             // This's the critical code. By traversing the token tree, if there is `(N` found, then we supersede N with the
             // replacement token tree.
-            let (Some(TokenTree::Punct(_)), Some(TokenTree::Ident(_))) =
+            let (Some(TokenTree::Punct(pnunc)), Some(TokenTree::Ident(maybe_placeholder_ident))) =
                 (window.next(), window.next())
             else {
                 self.expanded(&mut t);
@@ -101,8 +101,25 @@ impl VisitMut for Placeholder {
                 continue;
             };
 
-            self.expanded(&mut t);
-            tokens.push(t);
+            if pnunc.as_char() == '~'
+                && let Some(last_ident) = tokens.last()
+            {
+                let right_ident = if maybe_placeholder_ident == self.placeholder {
+                    self.replacement.to_string()
+                } else {
+                    maybe_placeholder_ident.to_string()
+                };
+                let new_ident =
+                    Ident::new(&format!("{}{}", last_ident, right_ident), last_ident.span());
+                // Since the `f~N` is superseded by `f1`, we need to pop the `~` manually.
+                let _ = iter.nth(0);
+                // Pop the last_ident since it had concat `in new_ident`
+                tokens.pop();
+                tokens.push(syn::parse_quote! { #new_ident});
+            } else {
+                self.expanded(&mut t);
+                tokens.push(t);
+            }
         }
 
         *node = parse_quote_spanned! {node.span()=> #(#tokens)*};
@@ -115,7 +132,7 @@ impl Placeholder {
             TokenTree::Group(g) => {
                 let mut stream = g.stream();
                 let delimiter = g.delimiter();
-                // Yeah, Once there is still TokenStream left, we recursively parse it by `visit_token_stream_mut`. 
+                // Yeah, Once there is still TokenStream left, we recursively parse it by `visit_token_stream_mut`.
                 // Beware that stream had spilted off the delimiter (like `[]` or `()` or `{}`)
                 self.visit_token_stream_mut(&mut stream);
                 // We need to recover the delimiter, so encapsulate the stream with the delimiter.
