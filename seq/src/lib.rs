@@ -22,7 +22,46 @@ pub fn seq(input: TokenStream) -> TokenStream {
     }
 }
 
-fn exec_seq(seq: SeqParese) -> Result<TokenStream> {
+struct RangeExpand {
+    start: usize,
+    end: usize,
+    inclusive: bool,
+    name: Ident,
+}
+
+impl VisitMut for RangeExpand {
+    fn visit_token_stream_mut(&mut self, node: &mut proc_macro2::TokenStream) {
+        let mut tokens = Vec::with_capacity(self.end + self.start);
+
+        for i in self.start..self.end {
+            // `usize_unsuffixed` split the `usize` of `1usize`, and left it with `1`.
+            let num = proc_macro2::Literal::usize_unsuffixed(i);
+            let num = syn::parse_quote!(#num);
+            let mut placeholder = Placeholder {
+                placeholder: self.name.clone(),
+                replacement: num,
+            };
+            let mut body = node.clone();
+            placeholder.visit_token_stream_mut(&mut body);
+            tokens.push(body);
+        }
+        if self.inclusive {
+            let end = &self.end;
+            let a = syn::parse_quote!(#end);
+            let mut placeholder = Placeholder {
+                placeholder: self.name.clone(),
+                replacement: a,
+            };
+            let mut body = node.clone();
+            placeholder.visit_token_stream_mut(&mut body);
+            tokens.push(body);
+        }
+
+        *node = parse_quote_spanned! {node.span()=> #(#tokens)*};
+    }
+}
+
+fn exec_seq(mut seq: SeqParese) -> Result<TokenStream> {
     let Some(start) = seq.range.start else {
         return Err(syn::Error::new_spanned(
             seq.range.start,
@@ -39,33 +78,18 @@ fn exec_seq(seq: SeqParese) -> Result<TokenStream> {
     let end = parse_range(&end)?;
 
     let inclusive = matches!(seq.range.limits, syn::RangeLimits::Closed(_));
-    let mut tokens = Vec::with_capacity(end + start);
 
-    for i in start..end {
-        // `usize_unsuffixed` split the `usize` of `1usize`, and left it with `1`.
-        let num = proc_macro2::Literal::usize_unsuffixed(i);
-        let num = syn::parse_quote!(#num);
-        let mut placeholder = Placeholder {
-            placeholder: seq.name.clone(),
-            replacement: num,
-        };
-        let mut body = seq.body.clone();
-        placeholder.visit_token_stream_mut(&mut body);
-        tokens.push(body);
-    }
+    let mut expander = RangeExpand {
+        start,
+        end,
+        inclusive,
+        name: seq.name,
+    };
+    
+    expander.visit_token_stream_mut(&mut seq.body);
+    let tokens = &seq.body;
+    let tokens = quote::quote!(#tokens);
 
-    if inclusive {
-        let a = syn::parse_quote!(#end);
-        let mut placeholder = Placeholder {
-            placeholder: seq.name.clone(),
-            replacement: a,
-        };
-        let mut body = seq.body.clone();
-        placeholder.visit_token_stream_mut(&mut body);
-        tokens.push(body);
-    }
-
-    let tokens = quote::quote!(#(#tokens)*);
     Ok(TokenStream::from(tokens))
 }
 
