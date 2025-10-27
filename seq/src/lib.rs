@@ -1,5 +1,6 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Delimiter, TokenTree};
+use syn::ExprGroup;
 use syn::Result;
 use syn::parse_quote_spanned;
 use syn::spanned::Spanned;
@@ -302,6 +303,8 @@ impl Parse for SeqParese {
 
 fn parse_range(input: &syn::Expr) -> Result<usize> {
     match input {
+        // If seq macro wrapped by another macro, like `seq!(N in 0..NPROC { ... })`, the range expr($nproc) is a group expr
+        syn::Expr::Group(ExprGroup { expr, .. }) => parse_range(expr),
         syn::Expr::Lit(syn::ExprLit {
             lit: syn::Lit::Int(i),
             ..
