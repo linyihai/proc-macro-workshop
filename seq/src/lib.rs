@@ -46,8 +46,9 @@ impl VisitMut for RangeExpand {
             tokens.push(body);
         }
         if self.inclusive {
-            let end = &self.end;
-            let a = syn::parse_quote!(#end);
+            // `usize_unsuffixed` split the `usize` of `1usize`, and left it with `1`.
+            let num = proc_macro2::Literal::usize_unsuffixed(self.end);
+            let a = syn::parse_quote!(#num);
             let mut placeholder = Placeholder {
                 placeholder: self.name.clone(),
                 replacement: a,
