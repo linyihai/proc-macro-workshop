@@ -14,7 +14,7 @@ pub fn sorted(args: TokenStream, input: TokenStream) -> TokenStream {
 }
 
 fn sorted_impl(_: TokenStream, item: Item) -> Result<TokenStream, Error> {
-    if !matches!(item, Item::Enum(_)) {
+    let Item::Enum(enum_item) = item else {
         // Not `item.span`
         return Err(Error::new(
             Span::call_site(),
@@ -22,5 +22,26 @@ fn sorted_impl(_: TokenStream, item: Item) -> Result<TokenStream, Error> {
         ));
     };
 
-    Ok(TokenStream::from(item.to_token_stream()))
+    for (i, v) in enum_item.variants.iter().enumerate() {
+        if i == 0 {
+            continue;
+        }
+        let prev = &enum_item.variants[i - 1];
+        if prev.ident <= v.ident {
+            continue;
+        }
+        for j in enum_item.variants.iter().take(i) {
+            if j.ident > v.ident {
+                return Err(Error::new(
+                    v.ident.span(),
+                    format!(
+                        "{} should sort before {}",
+                        v.ident, j.ident
+                    ),
+                ));
+            }
+        }
+    }
+
+    Ok(TokenStream::from(enum_item.to_token_stream()))
 }
