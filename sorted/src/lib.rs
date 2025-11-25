@@ -1,8 +1,9 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::ToTokens;
+use syn::spanned::Spanned;
 use syn::visit_mut::VisitMut;
-use syn::{parse_macro_input, Arm, Error, Item, ItemFn, Pat, PatTupleStruct};
+use syn::{Arm, Error, Item, ItemFn, Pat, PatTupleStruct, Path, parse_macro_input};
 
 #[proc_macro_attribute]
 pub fn sorted(_: TokenStream, input: TokenStream) -> TokenStream {
@@ -71,6 +72,37 @@ struct Checker {
     errors: Vec<TokenStream>,
 }
 
+struct DisorderEnum {
+    enum_name: String,
+    span: Span,
+}
+
+impl DisorderEnum {
+    fn new(enum_name: String, span: Span) -> Self {
+        Self { enum_name, span }
+    }
+}
+
+impl PartialEq<Self> for DisorderEnum {
+    fn eq(&self, other: &Self) -> bool {
+        self.enum_name.eq(&other.enum_name)
+    }
+}
+
+impl PartialOrd for DisorderEnum {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.enum_name.cmp(&other.enum_name))
+    }
+}
+
+fn get_path(path: &Path) -> String {
+    path.segments
+        .iter()
+        .map(|seg| seg.ident.to_string())
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
 impl VisitMut for Checker {
     fn visit_expr_match_mut(&mut self, node: &mut syn::ExprMatch) {
         // Check if the match expression has the #[sorted] attribute
@@ -87,21 +119,28 @@ impl VisitMut for Checker {
         for (i, _) in idx {
             node.attrs.remove(i);
         }
-        let mut paths = vec![];
+        let mut paths: Vec<DisorderEnum> = vec![];
         for Arm { pat, .. } in &node.arms {
-            if let Pat::TupleStruct(PatTupleStruct { path, .. }) = pat {
-                paths.push(path.get_ident().unwrap().clone());
+            match pat {
+                Pat::TupleStruct(PatTupleStruct { path, .. }) => {
+                    // path.span() 的结果跟使用的rust版本紧密相关，rust稳定版和nightly版结果不一样
+                    let t = DisorderEnum::new(
+                        get_path(path),
+                        path.span(),
+                    );
+                    paths.push(t);
+                }
+                _ => continue,
             }
         }
         if let Some(hint) = disorder_hint(&paths) {
             let first = &paths[hint.0];
             let second = &paths[hint.1];
             let errors = Error::new(
-                first.span(),
+                first.span,
                 format!(
                     "{} should sort before {}",
-                    first.to_token_stream(),
-                    second.to_token_stream()
+                    first.enum_name, second.enum_name
                 ),
             )
             .to_compile_error();
