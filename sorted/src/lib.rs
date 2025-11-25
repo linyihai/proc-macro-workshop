@@ -127,6 +127,18 @@ impl VisitMut for Checker {
                     let t = DisorderEnum::new(get_path(path), path.span());
                     paths.push(t);
                 }
+                Pat::Ident(ident) => {
+                    let t = DisorderEnum::new(ident.ident.to_string(), ident.span());
+                    paths.push(t);
+                }
+                Pat::Wild(_) => {
+                    if paths.len() + 1 != node.arms.len() {
+                        let errors = Error::new(pat.span(), "_ should be last arm in #[sorted]")
+                            .to_compile_error();
+                        self.errors.push(errors.into());
+                        break;
+                    }
+                }
                 _ => {
                     let errors =
                         Error::new(pat.span(), "unsupported by #[sorted]").to_compile_error();
