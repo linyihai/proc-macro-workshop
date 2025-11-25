@@ -3,7 +3,7 @@ use proc_macro2::Span;
 use quote::ToTokens;
 use syn::spanned::Spanned;
 use syn::visit_mut::VisitMut;
-use syn::{Arm, Error, Item, ItemFn, Pat, PatTupleStruct, Path, parse_macro_input};
+use syn::{parse_macro_input, Arm, Error, Item, ItemFn, Pat, PatTupleStruct, Path};
 
 #[proc_macro_attribute]
 pub fn sorted(_: TokenStream, input: TokenStream) -> TokenStream {
@@ -124,13 +124,15 @@ impl VisitMut for Checker {
             match pat {
                 Pat::TupleStruct(PatTupleStruct { path, .. }) => {
                     // path.span() 的结果跟使用的rust版本紧密相关，rust稳定版和nightly版结果不一样
-                    let t = DisorderEnum::new(
-                        get_path(path),
-                        path.span(),
-                    );
+                    let t = DisorderEnum::new(get_path(path), path.span());
                     paths.push(t);
                 }
-                _ => continue,
+                _ => {
+                    let errors =
+                        Error::new(pat.span(), "unsupported by #[sorted]").to_compile_error();
+                    self.errors.push(errors.into());
+                    break;
+                }
             }
         }
         if let Some(hint) = disorder_hint(&paths) {
